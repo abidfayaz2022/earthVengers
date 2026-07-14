@@ -1,0 +1,750 @@
+openapi: 3.1.0
+info:
+  # Do not change the title, if the title changes, the import paths will be broken
+  title: Api
+  version: 0.1.0
+  description: Climate Action Platform API
+servers:
+  - url: /api
+    description: Base API path
+tags:
+  - name: health
+    description: Health operations
+  - name: auth
+    description: Authentication operations
+  - name: campaigns
+    description: Campaign operations
+  - name: enrollments
+    description: Campaign enrollment operations
+  - name: crowdfunding
+    description: Crowdfunding operations
+  - name: leaderboard
+    description: Gamified leaderboard operations
+  - name: goals
+    description: Platform goals operations
+  - name: Storage
+    description: Object storage upload and serving endpoints.
+  - name: mission-photos
+    description: Photo-proof upload and listing for mission completions.
+  - name: admin
+    description: Admin review queue for mission photo proofs.
+  - name: donors
+    description: Donor leaderboard operations.
+
+paths:
+  /healthz:
+    get:
+      operationId: healthCheck
+      tags: [health]
+      summary: Health check
+      responses:
+        "200":
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/HealthStatus"
+
+  # --- AUTH ---
+  /auth/register:
+    post:
+      operationId: register
+      tags: [auth]
+      summary: Register a new user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterInput"
+      responses:
+        "201":
+          description: User created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/login:
+    post:
+      operationId: login
+      tags: [auth]
+      summary: Login with email and password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginInput"
+      responses:
+        "200":
+          description: Login successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResponse"
+        "401":
+          description: Invalid credentials
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/logout:
+    post:
+      operationId: logout
+      tags: [auth]
+      summary: Logout current user
+      responses:
+        "200":
+          description: Logged out
+
+  /auth/me:
+    get:
+      operationId: getMe
+      tags: [auth]
+      summary: Get current authenticated user
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "401":
+          description: Not authenticated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # --- CAMPAIGNS ---
+  /campaigns:
+    get:
+      operationId: listCampaigns
+      tags: [campaigns]
+      summary: List all campaigns
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of campaigns
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Campaign"
+
+  /campaigns/{id}:
+    get:
+      operationId: getCampaign
+      tags: [campaigns]
+      summary: Get a single campaign
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Campaign details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Campaign"
+        "404":
+          description: Campaign not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # --- ENROLLMENTS ---
+  /enrollments:
+    get:
+      operationId: listMyEnrollments
+      tags: [enrollments]
+      summary: List current user's enrollments
+      responses:
+        "200":
+          description: List of enrollments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Enrollment"
+
+    post:
+      operationId: enrollInCampaign
+      tags: [enrollments]
+      summary: Enroll in a campaign
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/EnrollmentInput"
+      responses:
+        "201":
+          description: Enrollment created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Enrollment"
+        "400":
+          description: Already enrolled or invalid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /enrollments/{id}/complete:
+    post:
+      operationId: completeEnrollment
+      tags: [enrollments]
+      summary: Mark an enrollment task as completed (only for verificationType = 'none' missions; photo missions complete automatically once enough photos are approved)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Enrollment updated with completion
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Enrollment"
+        "400":
+          description: This mission requires photo proof and cannot be self-reported
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /enrollments/{id}/photos:
+    get:
+      operationId: listEnrollmentPhotos
+      tags: [mission-photos]
+      summary: List photo proofs submitted for an enrollment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Photo proofs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MissionPhoto"
+    post:
+      operationId: submitMissionPhoto
+      tags: [mission-photos]
+      summary: Submit a photo proof for a mission. Automatically completes the enrollment once enough approved photos exist.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SubmitMissionPhotoInput"
+      responses:
+        "201":
+          description: Photo submitted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SubmitMissionPhotoResponse"
+        "400":
+          description: Invalid submission (e.g. too soon after the last photo, or already has enough approved photos)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /enrollments/{id}:
+    delete:
+      operationId: unenrollFromCampaign
+      tags: [enrollments]
+      summary: Unenroll from a campaign
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Unenrolled successfully
+
+  # --- CROWDFUNDING ---
+  /crowdfunding:
+    get:
+      operationId: listFundraisers
+      tags: [crowdfunding]
+      summary: List all fundraising campaigns
+      responses:
+        "200":
+          description: List of fundraisers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Fundraiser"
+
+  /crowdfunding/{id}:
+    get:
+      operationId: getFundraiser
+      tags: [crowdfunding]
+      summary: Get a fundraiser's details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Fundraiser details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Fundraiser"
+
+  /crowdfunding/{id}/donate:
+    post:
+      operationId: donate
+      tags: [crowdfunding]
+      summary: Make a donation to a fundraiser
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DonationInput"
+      responses:
+        "201":
+          description: Donation recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Donation"
+
+  # --- LEADERBOARD ---
+  /leaderboard:
+    get:
+      operationId: getLeaderboard
+      tags: [leaderboard]
+      summary: Get gamified leaderboard
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+        - name: category
+          in: query
+          required: false
+          description: Filter to a mission category leaderboard. Omit for the all-time overall leaderboard.
+          schema:
+            type: string
+            enum: [daily, weekly, monthly, awareness]
+      responses:
+        "200":
+          description: Leaderboard entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LeaderboardEntry"
+
+  /leaderboard/me:
+    get:
+      operationId: getMyRank
+      tags: [leaderboard]
+      summary: Get the current user's rank and points
+      parameters:
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [daily, weekly, monthly, awareness]
+      responses:
+        "200":
+          description: User rank info
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LeaderboardEntry"
+
+  /leaderboard/champions:
+    get:
+      operationId: getChampions
+      tags: [leaderboard]
+      summary: Get the top 5 title-holders for each mission category, plus the Stone Collector if any single user holds rank #1 in all four categories
+      responses:
+        "200":
+          description: Champions by category
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChampionsResponse"
+
+  # --- GOALS ---
+  /goals:
+    get:
+      operationId: listGoals
+      tags: [goals]
+      summary: List platform goals and progress
+      responses:
+        "200":
+          description: Goals list
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Goal"
+
+  # --- STATS (wow endpoint) ---
+  /stats/summary:
+    get:
+      operationId: getStatsSummary
+      tags: [campaigns]
+      summary: Get platform-wide impact statistics
+      responses:
+        "200":
+          description: Platform stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatsSummary"
+
+components:
+  schemas:
+    HealthStatus:
+      type: object
+      properties:
+        status:
+          type: string
+      required:
+        - status
+
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    # Auth
+    RegisterInput:
+      type: object
+      required: [name, email, password]
+      properties:
+        name:
+          type: string
+          minLength: 2
+        email:
+          type: string
+        password:
+          type: string
+          minLength: 6
+
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email:
+          type: string
+        password:
+          type: string
+
+    User:
+      type: object
+      required: [id, name, email, points, createdAt]
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        email:
+          type: string
+        points:
+          type: integer
+        avatarUrl:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    AuthResponse:
+      type: object
+      required: [user]
+      properties:
+        user:
+          $ref: "#/components/schemas/User"
+
+    # Campaigns
+    Campaign:
+      type: object
+      required: [id, title, description, category, difficulty, pointsReward, frequency, enrolledCount, createdAt]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        category:
+          type: string
+        difficulty:
+          type: string
+        pointsReward:
+          type: integer
+        frequency:
+          type: string
+          enum: [daily, weekly, monthly, awareness]
+        imageUrl:
+          type: ["string", "null"]
+        enrolledCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+
+    # Enrollments
+    EnrollmentInput:
+      type: object
+      required: [campaignId]
+      properties:
+        campaignId:
+          type: integer
+
+    Enrollment:
+      type: object
+      required: [id, userId, campaignId, completions, createdAt]
+      properties:
+        id:
+          type: integer
+        userId:
+          type: integer
+        campaignId:
+          type: integer
+        campaign:
+          $ref: "#/components/schemas/Campaign"
+        completions:
+          type: integer
+        lastCompletedAt:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    # Crowdfunding
+    Fundraiser:
+      type: object
+      required: [id, title, description, goalAmount, raisedAmount, donorCount, deadline, createdAt]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        goalAmount:
+          type: number
+        raisedAmount:
+          type: number
+        donorCount:
+          type: integer
+        imageUrl:
+          type: ["string", "null"]
+        deadline:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    DonationInput:
+      type: object
+      required: [amount, donorName]
+      properties:
+        amount:
+          type: number
+          minimum: 1
+        donorName:
+          type: string
+        message:
+          type: string
+
+    Donation:
+      type: object
+      required: [id, fundraiserId, amount, donorName, createdAt]
+      properties:
+        id:
+          type: integer
+        fundraiserId:
+          type: integer
+        amount:
+          type: number
+        donorName:
+          type: string
+        message:
+          type: ["string", "null"]
+        createdAt:
+          type: string
+          format: date-time
+
+    # Leaderboard
+    LeaderboardEntry:
+      type: object
+      required: [rank, userId, name, points, completions, level]
+      properties:
+        rank:
+          type: integer
+        userId:
+          type: integer
+        name:
+          type: string
+        avatarUrl:
+          type: ["string", "null"]
+        points:
+          type: integer
+        completions:
+          type: integer
+        level:
+          type: string
+        badge:
+          type: ["string", "null"]
+        title:
+          description: Marvel-themed title awarded to the top 5 ranks of a category leaderboard
+          type: ["string", "null"]
+        isStoneCollector:
+          description: True if this user holds rank #1 in all four category leaderboards at once
+          type: boolean
+
+    CategoryChampion:
+      type: object
+      required: [category, rank, userId, name, title, points]
+      properties:
+        category:
+          type: string
+          enum: [daily, weekly, monthly, awareness]
+        rank:
+          type: integer
+        userId:
+          type: integer
+        name:
+          type: string
+        avatarUrl:
+          type: ["string", "null"]
+        title:
+          type: string
+        points:
+          type: integer
+
+    ChampionsResponse:
+      type: object
+      required: [daily, weekly, monthly, awareness, stoneCollector]
+      properties:
+        daily:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategoryChampion"
+        weekly:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategoryChampion"
+        monthly:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategoryChampion"
+        awareness:
+          type: array
+          items:
+            $ref: "#/components/schemas/CategoryChampion"
+        stoneCollector:
+          type: ["object", "null"]
+          properties:
+            userId:
+              type: integer
+            name:
+              type: string
+            avatarUrl:
+              type: ["string", "null"]
+
+    # Goals
+    Goal:
+      type: object
+      required: [id, title, description, targetValue, currentValue, unit, color]
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        description:
+          type: string
+        targetValue:
+          type: number
+        currentValue:
+          type: number
+        unit:
+          type: string
+        color:
+          type: string
+        icon:
+          type: ["string", "null"]
+
+    # Stats
+    StatsSummary:
+      type: object
+      required: [totalUsers, totalEnrollments, totalCompletions, totalDonations, totalCO2Saved, treesPlanted]
+      properties:
+        totalUsers:
+          type: integer
+        totalEnrollments:
+          type: integer
+        totalCompletions:
+          type: integer
+        totalDonations:
+          type: number
+        totalCO2Saved:
+          type: number
+        treesPlanted:
+          type: integer

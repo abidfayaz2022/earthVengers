@@ -1,0 +1,27 @@
+kind = "web"
+previewPath = "/"
+title = "Climate Action"
+version = "1.0.0"
+id = "artifacts/climate-change"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 21922
+
+[services.development]
+run = "pnpm --filter @workspace/climate-change run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/climate-change", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/climate-change/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "21922"
+BASE_PATH = "/"

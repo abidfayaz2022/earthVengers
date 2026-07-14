@@ -1,0 +1,1 @@
+- [earthVENGERS leaderboard categories](earthvengers-leaderboard-categories.md) — category leaderboards = mission frequency buckets (daily/weekly/monthly/awareness), not rolling time windows.
