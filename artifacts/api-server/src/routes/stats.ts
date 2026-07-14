@@ -1,26 +1,20 @@
 import { Router, type IRouter } from "express";
-import { db, usersTable, enrollmentsTable, donationsTable } from "@workspace/db";
-import { sql } from "drizzle-orm";
+import { dataStore } from "../lib/dataStore";
 import { GetStatsSummaryResponse } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
 router.get("/stats/summary", async (_req, res): Promise<void> => {
-  const [{ totalUsers }] = await db
-    .select({ totalUsers: sql<number>`count(*)` })
-    .from(usersTable);
-
-  const [{ totalEnrollments }] = await db
-    .select({ totalEnrollments: sql<number>`count(*)` })
-    .from(enrollmentsTable);
-
-  const [{ totalCompletions }] = await db
-    .select({ totalCompletions: sql<number>`coalesce(sum(${enrollmentsTable.completions}), 0)` })
-    .from(enrollmentsTable);
-
-  const [{ totalDonations }] = await db
-    .select({ totalDonations: sql<number>`coalesce(sum(amount), 0)` })
-    .from(donationsTable);
+  const totalUsers = dataStore.users.length;
+  const totalEnrollments = dataStore.enrollments.length;
+  const totalCompletions = dataStore.enrollments.reduce(
+    (sum, enrollment) => sum + enrollment.completions,
+    0,
+  );
+  const totalDonations = dataStore.donations.reduce(
+    (sum, donation) => sum + donation.amount,
+    0,
+  );
 
   const completions = Number(totalCompletions) || 0;
   const trees = Math.floor(completions * 0.4); // estimate

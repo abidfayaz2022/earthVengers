@@ -29,7 +29,7 @@ export default function Login() {
       onError: (error) => {
         toast({
           title: "Access Denied",
-          description: error.error || "Invalid credentials",
+          description: error.data?.error || "Invalid credentials",
           variant: "destructive"
         })
       }
@@ -38,7 +38,7 @@ export default function Login() {
 
   const form = useForm({
     resolver: zodResolver(schema),
-    defaultValues: { email: "", password: "" }
+    defaultValues: { email: "amara@demo.com", password: "demo" }
   })
 
   return (

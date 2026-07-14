@@ -8,9 +8,6 @@ import leaderboardRouter from "./leaderboard";
 import goalsRouter from "./goals";
 import statsRouter from "./stats";
 import storageRouter from "./storage";
-import missionPhotosRouter from "./mission-photos";
-import adminRouter from "./admin";
-import donorsRouter from "./donors";
 
 const router: IRouter = Router();
 
@@ -23,8 +20,5 @@ router.use(leaderboardRouter);
 router.use(goalsRouter);
 router.use(statsRouter);
 router.use(storageRouter);
-router.use(missionPhotosRouter);
-router.use(adminRouter);
-router.use(donorsRouter);
 
 export default router;

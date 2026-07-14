@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "export NODE_ENV=development && pnpm run build && pnpm run start",
+    "dev": "export NODE_ENV=development PORT=${API_PORT:-5000} && pnpm run build && pnpm run start",
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit"
@@ -14,11 +14,9 @@
     "@types/bcrypt": "^6.0.0",
     "@types/express-session": "^1.19.0",
     "@workspace/api-zod": "workspace:*",
-    "@workspace/db": "workspace:*",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
-    "drizzle-orm": "catalog:",
     "express": "^5.2.1",
     "express-session": "^1.19.0",
     "google-auth-library": "^10.9.0",

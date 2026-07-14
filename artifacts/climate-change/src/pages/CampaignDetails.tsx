@@ -10,7 +10,7 @@ export default function CampaignDetails() {
   const params = useParams()
   const id = Number(params.id)
   
-  const { data: campaign, isLoading } = useGetCampaign(id, { query: { enabled: !!id } })
+  const { data: campaign, isLoading } = useGetCampaign(id)
   const { data: enrollments } = useListMyEnrollments()
   const queryClient = useQueryClient()
 

@@ -1,32 +1,41 @@
-# [Project name]
+# Climate Action Hub
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A gamified climate-action app with campaigns, goals, leaderboards, and crowdfunding.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm dev` — run the API (port 5000) and web app (port 5173)
+- `pnpm run dev:serverless` — run the frontend and API through Vercel's local emulator
+- `pnpm run build:vercel` — build the Vercel static frontend output
+- `pnpm --filter @workspace/api-server run dev` — run only the API server
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
-- `pnpm --filter @workspace/db run push` — push DB schema changes (dev only)
-- Required env: `DATABASE_URL` — Postgres connection string
+- No database or required development environment variables.
+- Optional env: `API_PORT`, `FRONTEND_PORT`, `SESSION_SECRET`.
+- Vercel requires `SESSION_SECRET`; see `VERCEL_DEPLOYMENT.md`.
 
 ## Stack
 
 - pnpm workspaces, Node.js 24, TypeScript 5.9
 - API: Express 5
-- DB: PostgreSQL + Drizzle ORM
+- Data: bundled CSV snapshots with in-memory runtime updates
 - Validation: Zod (`zod/v4`), `drizzle-zod`
 - API codegen: Orval (from OpenAPI spec)
 - Build: esbuild (CJS bundle)
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- CSV seed data: `artifacts/api-server/src/data`
+- In-memory store: `artifacts/api-server/src/lib/dataStore.ts`
+- API routes: `artifacts/api-server/src/routes`
+- Frontend: `artifacts/climate-change/src`
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- CSV files are bundled into the API executable at build time.
+- Registrations, enrollments, completions, and donations persist only until restart.
+- Seeded `@demo.com` accounts use the development password `demo`.
 
 ## Product
 

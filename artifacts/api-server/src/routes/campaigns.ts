@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, campaignsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { dataStore } from "../lib/dataStore";
 import {
   ListCampaignsQueryParams,
   GetCampaignParams,
@@ -17,7 +16,7 @@ router.get("/campaigns", async (req, res): Promise<void> => {
     return;
   }
 
-  let campaigns = await db.select().from(campaignsTable);
+  let campaigns = [...dataStore.campaigns];
 
   if (params.data.category) {
     campaigns = campaigns.filter(
@@ -49,10 +48,9 @@ router.get("/campaigns/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [campaign] = await db
-    .select()
-    .from(campaignsTable)
-    .where(eq(campaignsTable.id, params.data.id));
+  const campaign = dataStore.campaigns.find(
+    (candidate) => candidate.id === params.data.id,
+  );
 
   if (!campaign) {
     res.status(404).json({ error: "Campaign not found" });

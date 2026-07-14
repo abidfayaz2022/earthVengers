@@ -1,6 +1,10 @@
 import { Router, type IRouter } from "express";
-import { db, enrollmentsTable, campaignsTable, usersTable, completionLogsTable } from "@workspace/db";
-import { eq, and } from "drizzle-orm";
+import {
+  dataStore,
+  nextId,
+  type CampaignRecord,
+  type EnrollmentRecord,
+} from "../lib/dataStore";
 import {
   EnrollInCampaignBody,
   CompleteEnrollmentParams,
@@ -20,47 +24,47 @@ function requireAuth(req: any, res: any): number | null {
   return req.session.userId as number;
 }
 
+function campaignOut(campaign: CampaignRecord) {
+  return {
+    id: campaign.id,
+    title: campaign.title,
+    description: campaign.description,
+    category: campaign.category,
+    difficulty: campaign.difficulty,
+    pointsReward: campaign.pointsReward,
+    frequency: campaign.frequency,
+    imageUrl: campaign.imageUrl,
+    enrolledCount: campaign.enrolledCount,
+    createdAt: campaign.createdAt.toISOString(),
+  };
+}
+
+function enrollmentOut(enrollment: EnrollmentRecord, campaign?: CampaignRecord) {
+  return {
+    id: enrollment.id,
+    userId: enrollment.userId,
+    campaignId: enrollment.campaignId,
+    campaign: campaign ? campaignOut(campaign) : undefined,
+    completions: enrollment.completions,
+    lastCompletedAt: enrollment.lastCompletedAt?.toISOString() ?? null,
+    createdAt: enrollment.createdAt.toISOString(),
+  };
+}
+
 router.get("/enrollments", async (req, res): Promise<void> => {
   const userId = requireAuth(req, res);
   if (!userId) return;
 
-  const rows = await db
-    .select()
-    .from(enrollmentsTable)
-    .where(eq(enrollmentsTable.userId, userId));
-
-  // Fetch campaign details for each enrollment
-  const result = await Promise.all(
-    rows.map(async (e) => {
-      const [campaign] = await db
-        .select()
-        .from(campaignsTable)
-        .where(eq(campaignsTable.id, e.campaignId));
-
-      return {
-        id: e.id,
-        userId: e.userId,
-        campaignId: e.campaignId,
-        campaign: campaign
-          ? {
-              id: campaign.id,
-              title: campaign.title,
-              description: campaign.description,
-              category: campaign.category,
-              difficulty: campaign.difficulty,
-              pointsReward: campaign.pointsReward,
-              frequency: campaign.frequency,
-              imageUrl: campaign.imageUrl,
-              enrolledCount: campaign.enrolledCount,
-              createdAt: campaign.createdAt.toISOString(),
-            }
-          : undefined,
-        completions: e.completions,
-        lastCompletedAt: e.lastCompletedAt ? e.lastCompletedAt.toISOString() : null,
-        createdAt: e.createdAt.toISOString(),
-      };
-    })
-  );
+  const result = dataStore.enrollments
+    .filter((enrollment) => enrollment.userId === userId)
+    .map((enrollment) =>
+      enrollmentOut(
+        enrollment,
+        dataStore.campaigns.find(
+          (campaign) => campaign.id === enrollment.campaignId,
+        ),
+      ),
+    );
 
   res.json(ListMyEnrollmentsResponse.parse(result));
 });
@@ -75,63 +79,37 @@ router.post("/enrollments", async (req, res): Promise<void> => {
     return;
   }
 
-  const { campaignId } = parsed.data;
-
-  // Check campaign exists
-  const [campaign] = await db
-    .select()
-    .from(campaignsTable)
-    .where(eq(campaignsTable.id, campaignId));
-
+  const campaign = dataStore.campaigns.find(
+    (candidate) => candidate.id === parsed.data.campaignId,
+  );
   if (!campaign) {
     res.status(404).json({ error: "Campaign not found" });
     return;
   }
 
-  // Check already enrolled
-  const existing = await db
-    .select()
-    .from(enrollmentsTable)
-    .where(and(eq(enrollmentsTable.userId, userId), eq(enrollmentsTable.campaignId, campaignId)));
-
-  if (existing.length > 0) {
+  const alreadyEnrolled = dataStore.enrollments.some(
+    (enrollment) =>
+      enrollment.userId === userId && enrollment.campaignId === campaign.id,
+  );
+  if (alreadyEnrolled) {
     res.status(400).json({ error: "Already enrolled in this campaign" });
     return;
   }
 
-  const [enrollment] = await db
-    .insert(enrollmentsTable)
-    .values({ userId, campaignId })
-    .returning();
+  const enrollment: EnrollmentRecord = {
+    id: nextId(dataStore.enrollments),
+    userId,
+    campaignId: campaign.id,
+    completions: 0,
+    lastCompletedAt: null,
+    createdAt: new Date(),
+  };
+  dataStore.enrollments.push(enrollment);
+  campaign.enrolledCount += 1;
 
-  // Increment enrolledCount
-  await db
-    .update(campaignsTable)
-    .set({ enrolledCount: campaign.enrolledCount + 1 })
-    .where(eq(campaignsTable.id, campaignId));
-
-  res.status(201).json(
-    EnrollInCampaignResponse.parse({
-      id: enrollment.id,
-      userId: enrollment.userId,
-      campaignId: enrollment.campaignId,
-      campaign: {
-        id: campaign.id,
-        title: campaign.title,
-        description: campaign.description,
-        category: campaign.category,
-        difficulty: campaign.difficulty,
-        pointsReward: campaign.pointsReward,
-        frequency: campaign.frequency,
-        imageUrl: campaign.imageUrl,
-        enrolledCount: campaign.enrolledCount + 1,
-        createdAt: campaign.createdAt.toISOString(),
-      },
-      completions: enrollment.completions,
-      lastCompletedAt: null,
-      createdAt: enrollment.createdAt.toISOString(),
-    })
-  );
+  res
+    .status(201)
+    .json(EnrollInCampaignResponse.parse(enrollmentOut(enrollment, campaign)));
 });
 
 router.post("/enrollments/:id/complete", async (req, res): Promise<void> => {
@@ -145,72 +123,35 @@ router.post("/enrollments/:id/complete", async (req, res): Promise<void> => {
     return;
   }
 
-  const [enrollment] = await db
-    .select()
-    .from(enrollmentsTable)
-    .where(and(eq(enrollmentsTable.id, params.data.id), eq(enrollmentsTable.userId, userId)));
-
+  const enrollment = dataStore.enrollments.find(
+    (candidate) => candidate.id === params.data.id && candidate.userId === userId,
+  );
   if (!enrollment) {
     res.status(404).json({ error: "Enrollment not found" });
     return;
   }
 
-  const [campaign] = await db
-    .select()
-    .from(campaignsTable)
-    .where(eq(campaignsTable.id, enrollment.campaignId));
+  const campaign = dataStore.campaigns.find(
+    (candidate) => candidate.id === enrollment.campaignId,
+  );
+  enrollment.completions += 1;
+  enrollment.lastCompletedAt = new Date();
 
-  const now = new Date();
-  const [updated] = await db
-    .update(enrollmentsTable)
-    .set({
-      completions: enrollment.completions + 1,
-      lastCompletedAt: now,
-    })
-    .where(eq(enrollmentsTable.id, enrollment.id))
-    .returning();
-
-  // Award points to user
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, userId));
+  const user = dataStore.users.find((candidate) => candidate.id === userId);
   if (user && campaign) {
-    await db
-      .update(usersTable)
-      .set({ points: user.points + campaign.pointsReward })
-      .where(eq(usersTable.id, userId));
-
-    // Log this completion so category leaderboards (daily/weekly/monthly/awareness)
-    // can be computed independently of lifetime overall points.
-    await db.insert(completionLogsTable).values({
+    user.points += campaign.pointsReward;
+    dataStore.completionLogs.push({
+      id: nextId(dataStore.completionLogs),
       userId,
       campaignId: campaign.id,
       category: campaign.frequency,
       pointsEarned: campaign.pointsReward,
+      completedAt: enrollment.lastCompletedAt,
     });
   }
 
   res.json(
-    CompleteEnrollmentResponse.parse({
-      id: updated.id,
-      userId: updated.userId,
-      campaignId: updated.campaignId,
-      campaign: campaign
-        ? {
-            id: campaign.id,
-            title: campaign.title,
-            description: campaign.description,
-            category: campaign.category,
-            difficulty: campaign.difficulty,
-            pointsReward: campaign.pointsReward,
-            frequency: campaign.frequency,
-            imageUrl: campaign.imageUrl,
-            enrolledCount: campaign.enrolledCount,
-            createdAt: campaign.createdAt.toISOString(),
-          }
-        : undefined,
-      completions: updated.completions,
-      lastCompletedAt: updated.lastCompletedAt ? updated.lastCompletedAt.toISOString() : null,
-      createdAt: updated.createdAt.toISOString(),
-    })
+    CompleteEnrollmentResponse.parse(enrollmentOut(enrollment, campaign)),
   );
 });
 
@@ -225,30 +166,19 @@ router.delete("/enrollments/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [enrollment] = await db
-    .select()
-    .from(enrollmentsTable)
-    .where(and(eq(enrollmentsTable.id, params.data.id), eq(enrollmentsTable.userId, userId)));
-
-  if (!enrollment) {
+  const enrollmentIndex = dataStore.enrollments.findIndex(
+    (candidate) => candidate.id === params.data.id && candidate.userId === userId,
+  );
+  if (enrollmentIndex === -1) {
     res.status(404).json({ error: "Enrollment not found" });
     return;
   }
 
-  await db.delete(enrollmentsTable).where(eq(enrollmentsTable.id, enrollment.id));
-
-  // Decrement enrolledCount
-  const [campaign] = await db
-    .select()
-    .from(campaignsTable)
-    .where(eq(campaignsTable.id, enrollment.campaignId));
-
-  if (campaign && campaign.enrolledCount > 0) {
-    await db
-      .update(campaignsTable)
-      .set({ enrolledCount: campaign.enrolledCount - 1 })
-      .where(eq(campaignsTable.id, campaign.id));
-  }
+  const [enrollment] = dataStore.enrollments.splice(enrollmentIndex, 1);
+  const campaign = dataStore.campaigns.find(
+    (candidate) => candidate.id === enrollment.campaignId,
+  );
+  if (campaign && campaign.enrolledCount > 0) campaign.enrolledCount -= 1;
 
   res.json({ ok: true });
 });

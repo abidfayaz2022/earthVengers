@@ -1,8 +1,4 @@
 import { Readable } from 'stream';
-import {
-  RequestUploadUrlBody,
-  RequestUploadUrlResponse,
-} from '@workspace/api-zod';
 import { Router, type IRouter, type Request, type Response } from 'express';
 
 import { ObjectPermission } from '../lib/objectAcl';
@@ -35,26 +31,29 @@ router.post(
       return;
     }
 
-    const parsed = RequestUploadUrlBody.safeParse(req.body);
-    if (!parsed.success) {
+    const { name, size, contentType } = (req.body ?? {}) as Record<
+      string,
+      unknown
+    >;
+    if (
+      typeof name !== 'string' ||
+      typeof size !== 'number' ||
+      typeof contentType !== 'string'
+    ) {
       res.status(400).json({ error: 'Missing or invalid required fields' });
       return;
     }
 
     try {
-      const { name, size, contentType } = parsed.data;
-
       const uploadURL = await objectStorageService.getObjectEntityUploadURL();
       const objectPath =
         objectStorageService.normalizeObjectEntityPath(uploadURL);
 
-      res.json(
-        RequestUploadUrlResponse.parse({
-          uploadURL,
-          objectPath,
-          metadata: { name, size, contentType },
-        }),
-      );
+      res.json({
+        uploadURL,
+        objectPath,
+        metadata: { name, size, contentType },
+      });
     } catch (error) {
       req.log.error({ err: error }, 'Error generating upload URL');
       res.status(500).json({ error: 'Failed to generate upload URL' });

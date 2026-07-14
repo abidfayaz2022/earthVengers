@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, usersTable, enrollmentsTable, completionLogsTable } from "@workspace/db";
-import { eq, desc, sql, inArray } from "drizzle-orm";
+import { dataStore } from "../lib/dataStore";
 import {
   GetLeaderboardQueryParams,
   GetLeaderboardResponse,
@@ -14,7 +13,6 @@ const router: IRouter = Router();
 export const CATEGORIES = ["daily", "weekly", "monthly", "awareness"] as const;
 export type Category = (typeof CATEGORIES)[number];
 
-// Rank 1-5 Marvel-themed titles, awarded per category leaderboard.
 const RANK_TITLES: Record<number, string> = {
   1: "Sorcerer Supreme",
   2: "Thor, God of Thunder",
@@ -39,90 +37,67 @@ function getBadge(points: number): string | null {
   return null;
 }
 
-async function buildOverallLeaderboard(limit = 50) {
-  const users = await db
-    .select()
-    .from(usersTable)
-    .orderBy(desc(usersTable.points))
-    .limit(limit);
+function completionCount(userId: number): number {
+  return dataStore.enrollments
+    .filter((enrollment) => enrollment.userId === userId)
+    .reduce((sum, enrollment) => sum + enrollment.completions, 0);
+}
 
-  return Promise.all(
-    users.map(async (u, idx) => {
-      const [{ count }] = await db
-        .select({ count: sql<number>`sum(${enrollmentsTable.completions})` })
-        .from(enrollmentsTable)
-        .where(eq(enrollmentsTable.userId, u.id));
+function buildOverallLeaderboard(limit = 50) {
+  return [...dataStore.users]
+    .sort((left, right) => right.points - left.points)
+    .slice(0, limit)
+    .map((user, index) => ({
+      rank: index + 1,
+      userId: user.id,
+      name: user.name,
+      avatarUrl: user.avatarUrl,
+      points: user.points,
+      completions: completionCount(user.id),
+      level: getLevel(user.points),
+      badge: getBadge(user.points),
+      title: null as string | null,
+      isStoneCollector: false,
+    }));
+}
 
-      const completions = Number(count) || 0;
+function buildCategoryLeaderboard(category: Category, limit = 50) {
+  const totals = new Map<number, { points: number; completions: number }>();
+  for (const log of dataStore.completionLogs) {
+    if (log.category !== category) continue;
+    const total = totals.get(log.userId) ?? { points: 0, completions: 0 };
+    total.points += log.pointsEarned;
+    total.completions += 1;
+    totals.set(log.userId, total);
+  }
 
+  return [...totals.entries()]
+    .sort((left, right) => right[1].points - left[1].points)
+    .slice(0, limit)
+    .map(([userId, total], index) => {
+      const user = dataStore.users.find((candidate) => candidate.id === userId);
+      const rank = index + 1;
       return {
-        rank: idx + 1,
-        userId: u.id,
-        name: u.name,
-        avatarUrl: u.avatarUrl,
-        points: u.points,
-        completions,
-        level: getLevel(u.points),
-        badge: getBadge(u.points),
-        title: null as string | null,
+        rank,
+        userId,
+        name: user?.name ?? "Unknown",
+        avatarUrl: user?.avatarUrl ?? null,
+        points: total.points,
+        completions: total.completions,
+        level: getLevel(user?.points ?? 0),
+        badge: getBadge(user?.points ?? 0),
+        title: RANK_TITLES[rank] ?? null,
         isStoneCollector: false,
       };
-    })
-  );
+    });
 }
 
-// Category leaderboards rank users by points earned from missions in that
-// category only (summed from completion_logs), not lifetime overall points.
-async function buildCategoryLeaderboard(category: Category, limit = 50) {
-  const rows = await db
-    .select({
-      userId: completionLogsTable.userId,
-      points: sql<number>`sum(${completionLogsTable.pointsEarned})`.as("points"),
-      completions: sql<number>`count(*)`.as("completions"),
-    })
-    .from(completionLogsTable)
-    .where(eq(completionLogsTable.category, category))
-    .groupBy(completionLogsTable.userId)
-    .orderBy(desc(sql`sum(${completionLogsTable.pointsEarned})`))
-    .limit(limit);
-
-  if (rows.length === 0) return [];
-
-  const userIds = rows.map((r) => r.userId);
-  const users = await db.select().from(usersTable).where(inArray(usersTable.id, userIds));
-  const userMap = new Map(users.map((u) => [u.id, u]));
-
-  return rows.map((r, idx) => {
-    const u = userMap.get(r.userId);
-    const rank = idx + 1;
-    return {
-      rank,
-      userId: r.userId,
-      name: u?.name ?? "Unknown",
-      avatarUrl: u?.avatarUrl ?? null,
-      points: Number(r.points) || 0,
-      completions: Number(r.completions) || 0,
-      level: getLevel(u?.points ?? 0),
-      badge: getBadge(u?.points ?? 0),
-      title: RANK_TITLES[rank] ?? null,
-      isStoneCollector: false,
-    };
-  });
-}
-
-// A user who holds rank #1 in every category leaderboard simultaneously
-// collects all four "Infinity Stones" and earns the ultimate title.
-async function findStoneCollector(): Promise<number | null> {
-  const topPerCategory = await Promise.all(
-    CATEGORIES.map(async (cat) => {
-      const board = await buildCategoryLeaderboard(cat, 1);
-      return board[0]?.userId ?? null;
-    })
+function findStoneCollector(): number | null {
+  const leaders = CATEGORIES.map(
+    (category) => buildCategoryLeaderboard(category, 1)[0]?.userId ?? null,
   );
-
-  if (topPerCategory.some((id) => id === null)) return null;
-  const first = topPerCategory[0];
-  return topPerCategory.every((id) => id === first) ? first! : null;
+  if (leaders.some((id) => id === null)) return null;
+  return leaders.every((id) => id === leaders[0]) ? leaders[0] : null;
 }
 
 router.get("/leaderboard", async (req, res): Promise<void> => {
@@ -131,19 +106,16 @@ router.get("/leaderboard", async (req, res): Promise<void> => {
     res.status(400).json({ error: params.error.message });
     return;
   }
-  const limit = params.data.limit ?? 50;
-  const category = params.data.category as Category | undefined;
 
+  const category = params.data.category as Category | undefined;
   const board = category
-    ? await buildCategoryLeaderboard(category, limit)
-    : await buildOverallLeaderboard(limit);
+    ? buildCategoryLeaderboard(category, params.data.limit ?? 50)
+    : buildOverallLeaderboard(params.data.limit ?? 50);
 
   if (category) {
-    const stoneCollectorId = await findStoneCollector();
-    if (stoneCollectorId !== null) {
-      for (const entry of board) {
-        if (entry.userId === stoneCollectorId) entry.isStoneCollector = true;
-      }
+    const collectorId = findStoneCollector();
+    for (const entry of board) {
+      if (entry.userId === collectorId) entry.isStoneCollector = true;
     }
   }
 
@@ -161,14 +133,15 @@ router.get("/leaderboard/me", async (req, res): Promise<void> => {
     res.status(400).json({ error: params.error.message });
     return;
   }
-  const category = params.data.category as Category | undefined;
 
+  const category = params.data.category as Category | undefined;
   if (category) {
-    const board = await buildCategoryLeaderboard(category, 100000);
-    const entry = board.find((e) => e.userId === req.session.userId);
-    if (!entry) {
-      res.json(
-        GetMyRankResponse.parse({
+    const entry = buildCategoryLeaderboard(category, dataStore.users.length).find(
+      (candidate) => candidate.userId === req.session.userId,
+    );
+    res.json(
+      GetMyRankResponse.parse(
+        entry ?? {
           rank: 0,
           userId: req.session.userId,
           name: "",
@@ -179,72 +152,47 @@ router.get("/leaderboard/me", async (req, res): Promise<void> => {
           badge: null,
           title: null,
           isStoneCollector: false,
-        })
-      );
-      return;
-    }
-    res.json(GetMyRankResponse.parse(entry));
+        },
+      ),
+    );
     return;
   }
 
-  const allUsers = await db
-    .select()
-    .from(usersTable)
-    .orderBy(desc(usersTable.points));
-
-  const rank = allUsers.findIndex((u) => u.id === req.session.userId) + 1;
-  const user = allUsers.find((u) => u.id === req.session.userId);
-
-  if (!user) {
+  const board = buildOverallLeaderboard(dataStore.users.length);
+  const entry = board.find(
+    (candidate) => candidate.userId === req.session.userId,
+  );
+  if (!entry) {
     res.status(404).json({ error: "User not found" });
     return;
   }
-
-  const [{ count }] = await db
-    .select({ count: sql<number>`sum(${enrollmentsTable.completions})` })
-    .from(enrollmentsTable)
-    .where(eq(enrollmentsTable.userId, user.id));
-
-  const completions = Number(count) || 0;
-
-  res.json(
-    GetMyRankResponse.parse({
-      rank,
-      userId: user.id,
-      name: user.name,
-      avatarUrl: user.avatarUrl,
-      points: user.points,
-      completions,
-      level: getLevel(user.points),
-      badge: getBadge(user.points),
-      title: null,
-      isStoneCollector: false,
-    })
-  );
+  res.json(GetMyRankResponse.parse(entry));
 });
 
 router.get("/leaderboard/champions", async (_req, res): Promise<void> => {
-  const boards = await Promise.all(CATEGORIES.map((cat) => buildCategoryLeaderboard(cat, 5)));
+  const collectorId = findStoneCollector();
+  const collector = dataStore.users.find((user) => user.id === collectorId);
+  const result: Record<string, unknown> = {
+    stoneCollector: collector
+      ? {
+          userId: collector.id,
+          name: collector.name,
+          avatarUrl: collector.avatarUrl,
+        }
+      : null,
+  };
 
-  const stoneCollectorId = await findStoneCollector();
-  let stoneCollector = null;
-  if (stoneCollectorId !== null) {
-    const [u] = await db.select().from(usersTable).where(eq(usersTable.id, stoneCollectorId));
-    if (u) stoneCollector = { userId: u.id, name: u.name, avatarUrl: u.avatarUrl };
-  }
-
-  const result: Record<string, unknown> = { stoneCollector };
-  CATEGORIES.forEach((cat, i) => {
-    result[cat] = boards[i].map((e) => ({
-      category: cat,
-      rank: e.rank,
-      userId: e.userId,
-      name: e.name,
-      avatarUrl: e.avatarUrl,
-      title: e.title ?? RANK_TITLES[e.rank] ?? "Avenger",
-      points: e.points,
+  for (const category of CATEGORIES) {
+    result[category] = buildCategoryLeaderboard(category, 5).map((entry) => ({
+      category,
+      rank: entry.rank,
+      userId: entry.userId,
+      name: entry.name,
+      avatarUrl: entry.avatarUrl,
+      title: entry.title ?? "Avenger",
+      points: entry.points,
     }));
-  });
+  }
 
   res.json(GetChampionsResponse.parse(result));
 });

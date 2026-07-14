@@ -1,9 +1,33 @@
-import usersCsv from "../data/users.csv";
-import campaignsCsv from "../data/campaigns.csv";
-import enrollmentsCsv from "../data/enrollments.csv";
-import completionLogsCsv from "../data/completion_logs.csv";
-import fundraisersCsv from "../data/fundraisers.csv";
-import goalsCsv from "../data/goals.csv";
+import { existsSync, readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const dataDirectories = [
+  resolve(process.cwd(), "artifacts/api-server/src/data"),
+  resolve(process.cwd(), "src/data"),
+  fileURLToPath(new URL("../data", import.meta.url)),
+];
+
+function findDataDirectory(): string {
+  const directory = dataDirectories.find(existsSync);
+  if (!directory) {
+    throw new Error("Unable to locate bundled CSV data");
+  }
+  return directory;
+}
+
+const dataDirectory = findDataDirectory();
+
+function readCsv(fileName: string): string {
+  return readFileSync(resolve(dataDirectory, fileName), "utf8");
+}
+
+const usersCsv = readCsv("users.csv");
+const campaignsCsv = readCsv("campaigns.csv");
+const enrollmentsCsv = readCsv("enrollments.csv");
+const completionLogsCsv = readCsv("completion_logs.csv");
+const fundraisersCsv = readCsv("fundraisers.csv");
+const goalsCsv = readCsv("goals.csv");
 
 export interface UserRecord {
   id: number;

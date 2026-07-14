@@ -1,11 +1,11 @@
 import { Router, type IRouter } from "express";
-import { db, goalsTable } from "@workspace/db";
+import { dataStore } from "../lib/dataStore";
 import { ListGoalsResponse } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
 router.get("/goals", async (_req, res): Promise<void> => {
-  const goals = await db.select().from(goalsTable);
+  const goals = dataStore.goals;
   res.json(
     ListGoalsResponse.parse(
       goals.map((g) => ({

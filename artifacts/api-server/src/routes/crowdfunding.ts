@@ -1,6 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, fundraisersTable, donationsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { dataStore, nextId, type FundraiserRecord } from "../lib/dataStore";
 import {
   GetFundraiserParams,
   DonateParams,
@@ -12,13 +11,13 @@ import {
 
 const router: IRouter = Router();
 
-function toFundraiserOut(f: any) {
+function toFundraiserOut(f: FundraiserRecord) {
   return {
     id: f.id,
     title: f.title,
     description: f.description,
-    goalAmount: parseFloat(f.goalAmount),
-    raisedAmount: parseFloat(f.raisedAmount),
+    goalAmount: f.goalAmount,
+    raisedAmount: f.raisedAmount,
     donorCount: f.donorCount,
     imageUrl: f.imageUrl,
     deadline: f.deadline.toISOString(),
@@ -27,8 +26,7 @@ function toFundraiserOut(f: any) {
 }
 
 router.get("/crowdfunding", async (_req, res): Promise<void> => {
-  const fundraisers = await db.select().from(fundraisersTable);
-  res.json(ListFundraisersResponse.parse(fundraisers.map(toFundraiserOut)));
+  res.json(ListFundraisersResponse.parse(dataStore.fundraisers.map(toFundraiserOut)));
 });
 
 router.get("/crowdfunding/:id", async (req, res): Promise<void> => {
@@ -39,10 +37,9 @@ router.get("/crowdfunding/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [fundraiser] = await db
-    .select()
-    .from(fundraisersTable)
-    .where(eq(fundraisersTable.id, params.data.id));
+  const fundraiser = dataStore.fundraisers.find(
+    (candidate) => candidate.id === params.data.id,
+  );
 
   if (!fundraiser) {
     res.status(404).json({ error: "Fundraiser not found" });
@@ -66,10 +63,9 @@ router.post("/crowdfunding/:id/donate", async (req, res): Promise<void> => {
     return;
   }
 
-  const [fundraiser] = await db
-    .select()
-    .from(fundraisersTable)
-    .where(eq(fundraisersTable.id, params.data.id));
+  const fundraiser = dataStore.fundraisers.find(
+    (candidate) => candidate.id === params.data.id,
+  );
 
   if (!fundraiser) {
     res.status(404).json({ error: "Fundraiser not found" });
@@ -78,31 +74,25 @@ router.post("/crowdfunding/:id/donate", async (req, res): Promise<void> => {
 
   const { amount, donorName, message } = parsed.data;
 
-  const [donation] = await db
-    .insert(donationsTable)
-    .values({
-      fundraiserId: fundraiser.id,
-      amount: String(amount),
-      donorName,
-      message,
-    })
-    .returning();
+  const donation = {
+    id: nextId(dataStore.donations),
+    fundraiserId: fundraiser.id,
+    amount,
+    donorName,
+    message: message ?? null,
+    createdAt: new Date(),
+  };
+  dataStore.donations.push(donation);
 
   // Update fundraiser totals
-  const newRaised = parseFloat(fundraiser.raisedAmount) + amount;
-  await db
-    .update(fundraisersTable)
-    .set({
-      raisedAmount: String(newRaised),
-      donorCount: fundraiser.donorCount + 1,
-    })
-    .where(eq(fundraisersTable.id, fundraiser.id));
+  fundraiser.raisedAmount += amount;
+  fundraiser.donorCount += 1;
 
   res.status(201).json(
     DonateResponse.parse({
       id: donation.id,
       fundraiserId: donation.fundraiserId,
-      amount: parseFloat(String(donation.amount)),
+      amount: donation.amount,
       donorName: donation.donorName,
       message: donation.message,
       createdAt: donation.createdAt.toISOString(),

@@ -29,7 +29,7 @@ export default function Register() {
       onError: (error) => {
         toast({
           title: "Enlistment Failed",
-          description: error.error || "Unknown error",
+          description: error.data?.error || "Unknown error",
           variant: "destructive"
         })
       }
